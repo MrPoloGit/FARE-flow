@@ -1,10 +1,8 @@
 \
 # FARE-flow pipeline driver. Run `make help` for the target list.
 #
-# Expected to run inside `nix develop` (see flake.nix) for the default
-# path; the `hal` target shells out to the separate `nix develop .#hal`
-# FHS sandbox itself, since HAL needs a different environment than
-# everything else here.
+# Expected to run inside `nix develop` (see flake.nix) - one shell for
+# everything here, including HAL's own build/runtime deps.
 #
 # GDS/TOP are supplied by you - this repo intentionally doesn't ship any
 # puzzle/design files of its own:
@@ -47,11 +45,10 @@ $(HAL_DIR):
 	git clone $(HAL_REPO) $(HAL_DIR)
 
 $(HAL_BIN): | $(HAL_DIR) ## (order-only: clone happens first, doesn't force a rebuild on its own)
-	nix develop .#hal --command bash -c \
-	  "cd $(HAL_DIR) && mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja"
+	cd $(HAL_DIR) && mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja
 
 .PHONY: hal
-hal: $(HAL_BIN) ## Clone + build HAL (runs inside the separate `nix develop .#hal` FHS sandbox - see nix/hal-fhs.nix)
+hal: $(HAL_BIN) ## Clone + build HAL (needs the default `nix develop` shell - see flake.nix)
 
 $(LGE_DIR):
 	git clone $(LGE_REPO) $(LGE_DIR)
@@ -81,7 +78,7 @@ deps: pdk hal lge ## Fetch/build everything external (PDK + HAL + ReGDS-LGE)
 $(BUILD)/$(TOP).spice: $(PDK_ROOT_FILE)
 	@test -n "$(GDS)" -a -n "$(TOP)" || (echo "usage: make extract GDS=path/to/design.gds TOP=cell_name"; exit 1)
 	mkdir -p $(BUILD)
-	PDK_ROOT=$$(cat $(PDK_ROOT_FILE)); \
+	export PDK_ROOT=$$(cat $(PDK_ROOT_FILE)); \
 	RCFILE=$$PDK_ROOT/sky130A/libs.tech/magic/sky130A.magicrc; \
 	printf 'gds read %s\nload %s\nselect top cell\nextract all\next2spice lvs\next2spice %s\nquit -noprompt\n' \
 	  "$(abspath $(GDS))" "$(TOP)" "$(TOP)" > $(BUILD)/extract.tcl; \
@@ -99,10 +96,10 @@ check-anon: $(BUILD)/$(TOP).spice ## Report whether instance names came back rea
 	fi
 
 $(BUILD)/$(TOP).v: $(BUILD)/$(TOP).spice
-	python3 tools/spice2verilog/spice_to_verilog.py $(BUILD)/$(TOP).spice $(TOP) $(BUILD)/$(TOP).v
+	python3 tools/spice2verilog/spice_to_verilog.py $(BUILD)/$(TOP).spice $(TOP) $(BUILD)/$(TOP).v $(LIBERTY)
 
 .PHONY: netlist
-netlist: $(BUILD)/$(TOP).v ## SPICE -> Verilog, direct path (use when `check-anon` says names are real)
+netlist: $(BUILD)/$(TOP).v ## SPICE -> Verilog, direct path (use when `check-anon` says names are real). Optional LIBERTY= gives real input/output port directions instead of blanket "inout"
 
 $(BUILD)/$(TOP)_lge.spice: $(BUILD)/$(TOP).spice
 	python3 tools/lge_wrapper/convert_to_lge.py $(BUILD)/$(TOP).spice $(BUILD)/$(TOP)_lge.spice
@@ -124,18 +121,26 @@ netlist-lge: $(BUILD)/$(TOP)_hal_import.v ## SPICE -> Verilog, LGE path (use whe
 NET     ?= $(BUILD)/$(TOP).v
 LIBERTY ?=
 
+# NET/LIBERTY may point anywhere (e.g. LIBERTY is typically read straight out
+# of the read-only ciel PDK cache) - derived outputs always land in $(BUILD),
+# named after the input's own basename, rather than next to the input itself.
+NET_BASE     = $(basename $(notdir $(NET)))
+LIBERTY_BASE = $(basename $(notdir $(LIBERTY)))
+
 .PHONY: strip-power
 strip-power: ## Strip VPWR/VGND from a Verilog netlist (+ pg_pins from its Liberty) for readable HAL-GUI analysis. Needs NET= and LIBERTY=
 	@test -n "$(LIBERTY)" || (echo "usage: make strip-power NET=path/to/netlist.v LIBERTY=path/to/cells.lib"; exit 1)
-	python3 tools/hal_scripts/strip_verilog_power_ports.py $(NET) $(NET:.v=_no_pg.v)
-	python3 tools/hal_scripts/strip_liberty_pg_pins.py $(LIBERTY) $(LIBERTY:.lib=_no_pg.lib)
-	@echo "wrote $(NET:.v=_no_pg.v) and $(LIBERTY:.lib=_no_pg.lib)"
+	mkdir -p $(BUILD)
+	python3 tools/hal_scripts/strip_verilog_power_ports.py $(NET) $(BUILD)/$(NET_BASE)_no_pg.v
+	python3 tools/hal_scripts/strip_liberty_pg_pins.py $(LIBERTY) $(BUILD)/$(LIBERTY_BASE)_no_pg.lib
+	@echo "wrote $(BUILD)/$(NET_BASE)_no_pg.v and $(BUILD)/$(LIBERTY_BASE)_no_pg.lib"
 
 .PHONY: remove-decap
 remove-decap: $(HAL_BIN) ## Delete decap filler cells from a netlist (run AFTER strip-power). Needs NET= and LIBERTY=, runs inside HAL
 	@test -n "$(LIBERTY)" || (echo "usage: make remove-decap NET=path/to/netlist.v LIBERTY=path/to/cells.lib"; exit 1)
+	mkdir -p $(BUILD)
 	$(HAL_BIN) --python-script tools/hal_scripts/remove_decap_cells.py \
-	  --py-args "$(NET) $(LIBERTY) $(NET:.v=_no_decap.hal)"
+	  --py-args "$(NET) $(LIBERTY) $(BUILD)/$(NET_BASE)_no_decap.hal"
 
 # --- Housekeeping -------------------------------------------------------
 
