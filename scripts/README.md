@@ -1,9 +1,15 @@
-# tools/
+# scripts/
 
-Scripts ported from the original puzzle-solving session, sorted into the
-layout `docs/flow.md` proposes. These are copies, not yet generalized -
-most still carry puzzle-specific assumptions (port names, cell library
-paths) that `docs/flow.md`'s goal #4 calls out as needing a cleanup pass.
+FARE-flow's own first-party Python scripts, ported from the original
+puzzle-solving session and sorted into the layout `docs/flow.md`
+proposes. These are copies, not yet generalized - most still carry
+puzzle-specific assumptions (port names, cell library paths) that
+`docs/flow.md`'s goal #4 calls out as needing a cleanup pass.
+
+Downloaded/cloned third-party tools (HAL, ReGDS-Logic-Gate-Extraction,
+NetA) live separately under `tools/` (gitignored, fetched via `make hal`
+/ `make lge` / `make neta` - see the top-level README) - not to be
+confused with this directory.
 
 - **`gds2spice/`** - `build_locations.py` / `apply_locations.py`: recover
   real GDS coordinates from Magic's `.ext` output, for placing gates in
@@ -40,8 +46,8 @@ paths) that `docs/flow.md`'s goal #4 calls out as needing a cleanup pass.
 
 - `entry/from_gds.sh`, `entry/from_spice.sh`, `entry/from_netlist.sh` -
   the auto-picking entry-point wrappers `docs/flow.md` proposes.
-- `tools/klayout_crosscheck/` - optional second-opinion extraction via
+- `klayout_crosscheck/` - optional second-opinion extraction via
   KLayout, never implemented.
-- `tools/formal/` - a reusable SymbiYosys `.sby`/harness template and the
+- `formal/` - a reusable SymbiYosys `.sby`/harness template and the
   PDK-cell async-reset preprocessing pass; the working version that
   solved the puzzle was one-off files, not generalized here.

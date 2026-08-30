@@ -2,4 +2,4 @@ docs/flow.md
 .buildlogs/
 build/
 .pdk_root
-external/
+tools/
